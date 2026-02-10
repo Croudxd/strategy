@@ -19,8 +19,6 @@
  * Then we send a request to the SPSC for order-book to insert a match. The SPSC will open at the start of the program and loop. So idk how we will do this actually.
  */
 
-#include <cstdint>
-#include <iostream>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -34,7 +32,8 @@ class Strategy
     public:
         void run(backtester::Ring_buffer ring_buffer, backtester::Engine<Strategy>& engine)
         {
-                engine.buy();
+            if (backtester::SMA(3) > backtester::SMA(12))
+                engine.buy(100.0, 100.0);
         }
 };
 

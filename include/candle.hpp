@@ -18,7 +18,7 @@ class Candle
                 << "VOLUME: " << volume << std::endl;
         }
 
-        long get_open()
+        long get_open() const
         {
             return open;
         }
