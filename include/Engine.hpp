@@ -13,6 +13,7 @@
 namespace backtester
 {
 
+    static constexpr int BUFFER_CAPACITY = 16384;
     struct Candle_memory 
     {
         volatile uint64_t write_idx; 
@@ -31,6 +32,12 @@ namespace backtester
         Order            buffer[16384];
     };
 
+    enum class MemoryFlags
+    {
+        PRODUCER,
+        CONSUMER,
+    };
+
     template <typename Strategy>
     class Engine
     {
@@ -41,13 +48,23 @@ namespace backtester
             }
 
             template<typename T> 
-            T* map_mem(const char* path)
+            T* map_mem(const char* path, MemoryFlags flag )
             {
-                int fd = open(path, O_RDWR);
-                while (fd == -1) 
+
+                int fd = 0;
+                if (flag == MemoryFlags::CONSUMER)
                 {
-                    sleep(1);
                     fd = open(path, O_RDWR);
+                    while (fd == -1) 
+                    {
+                        sleep(1);
+                        fd = open(path, O_RDWR);
+                    }
+                }
+                if ( flag == MemoryFlags::PRODUCER)
+                {
+                        fd = open(path, O_RDWR | O_CREAT, 0666); 
+                        ftruncate(fd, sizeof(T)); 
                 }
 
                 void* ptr = mmap(NULL, sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -60,15 +77,18 @@ namespace backtester
                 return static_cast<T*>(ptr);
             }
 
+
             void connect()
             {
-                candle_mem = map_mem<Candle_memory>("/dev/shm/hft_candle");
-                order_mem = map_mem<Order_memory>("/dev/shm/hft_candle");
+                candle_mem = map_mem<Candle_memory>("/dev/shm/hft_candle", MemoryFlags::CONSUMER);
+                order_mem = map_mem<Order_memory>("/dev/shm/hft_order", MemoryFlags::PRODUCER);
             }
 
             // Add for order.
             void run ()
             {
+                {
+                }
                 uint64_t local_read_idx = candle_mem->write_idx;
                 candle_mem->read_idx = local_read_idx;
                 std::cout << "Watching memory...\n";
@@ -99,17 +119,65 @@ namespace backtester
                 }
             }
 
-            void buy(float pice, float quantity)
+            void buy(float price, float quantity)
             {
-                std::cout << "BOUGHT" << std::flush;
+                Order order = Order(price, quantity);
+                uint64_t local_write_idx = order_mem->write_idx;
+                uint64_t cached_read_idx = order_mem->read_idx; 
+                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
+                {
+                    cached_read_idx = order_mem->read_idx;
+                    
+                }
+                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
+                {
+                    return;
+                }
+
+                order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
+                std::atomic_thread_fence(std::memory_order_release);
+                order_mem->write_idx = local_write_idx + 1;
             }
 
-            void sold(float pice, float quantity)
+            void sold(float price, float quantity)
             {
-                std::cout << "SOLD" << std::flush;
+                Order order = Order(price, quantity);
+                uint64_t local_write_idx = order_mem->write_idx;
+                uint64_t cached_read_idx = order_mem->read_idx; 
+                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
+                {
+                    cached_read_idx = order_mem->read_idx;
+                    
+                }
+                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
+                {
+                    return;
+                }
+
+                order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
+                std::atomic_thread_fence(std::memory_order_release);
+                order_mem->write_idx = local_write_idx + 1;
             }
 
-            void cancel(size_t id) {}
+            void cancel(size_t id) 
+            {
+                // Order order = Order(price, quantity);
+                // uint64_t local_write_idx = order_mem->write_idx;
+                // uint64_t cached_read_idx = order_mem->read_idx; 
+                // if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
+                // {
+                //     cached_read_idx = order_mem->read_idx;
+                //
+                // }
+                // if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
+                // {
+                //     return;
+                // }
+                //
+                // order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
+                // std::atomic_thread_fence(std::memory_order_release);
+                // order_mem->write_idx = local_write_idx + 1;
+            }
 
             void warmup(size_t size)
             {

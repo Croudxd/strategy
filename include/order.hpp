@@ -7,6 +7,8 @@ namespace backtester
     {
         IOC,
         NORMAL,
+        CANCEL,
+        //...
     };
 
     struct Order 
