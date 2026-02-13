@@ -63,7 +63,6 @@ namespace backtester
                         }
                         close(fd); 
                     }
-                    std::cout << "Waiting for " << path << " to be initialized..." << std::endl;
                     sleep(1);
                 }
             }
@@ -95,7 +94,6 @@ namespace backtester
                 return nullptr;
             }
 
-            std::cout << "Connected to: " << path << std::endl;
             return static_cast<T*>(ptr);
         }
 

@@ -22,13 +22,6 @@ namespace backtester
         int8_t   status; // trade/order
         uint8_t  pad1[1];
 
-        void print()
-        {
-
-            std::cout << "id: " << id << std::endl;
-            std::cout << "size: " << size << std::endl;
-            std::cout << "price: " << price << std::endl;
-        }
-    };
+     };
 }
 
