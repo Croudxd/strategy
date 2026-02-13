@@ -154,7 +154,6 @@ namespace backtester
                     int    slot = local_report_read_idx % 16384;
                     Report raw  = report_mem->buffer[slot];
 
-                    raw.print();
                     on_report(raw);
 
                     local_report_read_idx++;
@@ -181,14 +180,12 @@ namespace backtester
             Order    order           = Order(order_id++, s, p, int_side, int_action, 0 /** status*/);
             uint64_t local_write_idx = order_mem->write_idx;
             uint64_t cached_read_idx = order_mem->read_idx;
-            order.print();
             while (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
             {
 
                 std::atomic_thread_fence(std::memory_order_acquire);
                 cached_read_idx = order_mem->read_idx;
             }
-            order.print();
             order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
             std::atomic_thread_fence(std::memory_order_release);
             order_mem->write_idx = local_write_idx + 1;

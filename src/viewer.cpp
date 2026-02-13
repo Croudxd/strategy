@@ -16,7 +16,6 @@ int main() {
     while (fd == -1) {
         fd = open("/dev/shm/hft_dashboard", O_RDWR);
         if (fd == -1) {
-            std::cout << "Waiting for Engine..." << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
     }
