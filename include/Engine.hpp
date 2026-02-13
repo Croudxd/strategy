@@ -1,5 +1,4 @@
 #pragma once
-
 #include <cstdint>
 #include <iostream>
 #include <fcntl.h>
@@ -9,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include "candle.hpp"
+#include "portfolio.hpp"
 #include "ring_buffer.hpp"
 #include "order.hpp"
 #include "report.hpp"
@@ -39,7 +39,7 @@ namespace backtester
     class Engine
     {
         public:
-            Engine()
+            Engine(double starting_cash, double fees) : portfolio(starting_cash, fees)
             {
                 ring_buffer = backtester::Ring_buffer();
                 history.reserve(1000);
@@ -116,10 +116,11 @@ namespace backtester
                         int slot = local_report_read_idx % 16384;
                         Report raw = report_mem->buffer[slot];
 
-
+                        on_report(raw);
 
                         local_report_read_idx++;
                         report_mem->read_idx = local_report_read_idx; 
+                        display();
                     }
                     else 
                     {
@@ -134,7 +135,7 @@ namespace backtester
                 int8_t int_action = (cancel == true) ? 1 : 0; 
                 uint64_t p = price * 100.0;
                 uint64_t s = size * 1000000.0;
-                Order order = Order(order_id++, price, size, int_side, int_action, 0 /** status*/);
+                Order order = Order(order_id++, p, s, int_side, int_action, 0 /** status*/);
                 uint64_t local_write_idx = order_mem->write_idx;
                 uint64_t cached_read_idx = order_mem->read_idx; 
                 if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
@@ -152,9 +153,9 @@ namespace backtester
                 order_mem->write_idx = local_write_idx + 1;
             }
 
-            void cancel_order(uint64_t order_id)
+            void cancel_order(uint64_t target_id)
             {
-                Order order = Order(order_id++, 0/**SIZE*/, 0/**PRICE*/, 0/**SIDE*/, 1/**ACTION*/, 0/**Status*/);
+                Order order = Order(target_id, 0/**SIZE*/, 0/**PRICE*/, 0/**SIDE*/, 1/**ACTION*/, 0/**Status*/);
                 uint64_t local_write_idx = order_mem->write_idx;
                 uint64_t cached_read_idx = order_mem->read_idx; 
                 if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
@@ -179,40 +180,81 @@ namespace backtester
             {
                 return &ring_buffer;
             }
+            void display() 
+            {
+                // Reset cursor to top-left and clear the screen
+                std::cout << "\033[H\033[J"; 
 
+                std::cout << "--- ACCOUNT BALANCE ------------------------------------\n";
+                printf(" CASH AVAILABLE: $%12.2f\n", portfolio.get_cash());
+                printf(" CASH LOCKED:    $%12.2f\n", portfolio.locked_cash);
+                printf(" POSITION:       %14.2f units\n", portfolio.position);
+                printf(" ACCUM. FEES:    $%12.2f\n", portfolio.total_fees);
+
+                // Active Orders Section
+                std::cout << "\n--- OPEN ORDERS (" << active_orders.size() << ") -------------------------------\n";
+                if (active_orders.empty()) {
+                    std::cout << " [ No active orders ]\n";
+                } else {
+                    std::cout << " ID    | SIDE | QTY      | PRICE    | TIMESTAMP\n";
+                    for (const auto& [id, ord] : active_orders) {
+                        printf(" %-5lu | %-4s | %-8lu | %-8u | %lu\n", 
+                               id, (ord.side == Side::BUY ? "BUY" : "SELL"),
+                               ord.leaves_quantity, ord.price, ord.timestamp);
+                    }
+                }
+
+                // Recent Activity Section
+                std::cout << "\n--- RECENT ACTIVITY ------------------------------------\n";
+                size_t start = history.size() > 5 ? history.size() - 5 : 0;
+                for (size_t i = start; i < history.size(); ++i) {
+                    auto& r = history[i];
+                    const char* s = (r.status == Status::FILLED) ? "FILL" : 
+                                    (r.status == Status::PARTIALLY_FILLED) ? "PART" : 
+                                    (r.status == Status::NEW) ? "NEW " : "CNCL";
+                    
+                    printf(" [%-4s] Order #%-4lu | Qty: %-6lu | Px: %-8ld\n", 
+                           s, r.order_id, r.last_quantity, r.last_price);
+                }
+                std::cout << "--------------------------------------------------------" << std::endl;
+            }
         private:
 
+            void on_report(const Report& raw) {
+                if (raw.status != Status::NEW) history.push_back(raw);
 
-            void on_report(const Report& raw)
-            {
-                if (raw.status != Status::NEW) {
-                    history.push_back(raw);
-                }
-
-                switch (raw.status) 
+                if (raw.status == Status::NEW) 
                 {
-                    case Status::NEW:
-                        active_orders[raw.order_id] = { 
-                            raw.order_id, 
-                            raw.leaves_quantity, 
-                            (uint64_t)raw.last_price, 
-                            raw.side,
-                            raw.timestamp 
-                        };
-                        break;
+                    portfolio.update(raw, (double)raw.last_price);
+                    
+                    active_orders[raw.order_id] = Active_orders
+                    {
+                        raw.order_id,
+                        raw.leaves_quantity,
+                        raw.last_price,
+                        raw.side,
+                        raw.timestamp
 
-                    case Status::PARTIALLY_FILLED:
-                        if (auto it = active_orders.find(raw.order_id); it != active_orders.end()) {
+                    };
+                }
+                else 
+                {
+                    auto it = active_orders.find(raw.order_id);
+                    if (it != active_orders.end()) 
+                    {
+                        double original_limit = (double)it->second.price;
+                        
+                        portfolio.update(raw, original_limit);
+
+                        if (raw.status == Status::FILLED || raw.status == Status::CANCELED) {
+                            active_orders.erase(it);
+                        }
+                        else if (raw.status == Status::PARTIALLY_FILLED) {
                             it->second.leaves_quantity = raw.leaves_quantity;
                         }
-                        break;
-
-                    case Status::FILLED:
-                    case Status::CANCELED:
-                    case Status::REJECTED:
-                        active_orders.erase(raw.order_id);
-                        break;
+                    }
                 }
+                display();
             }
 
 
@@ -224,6 +266,8 @@ namespace backtester
             size_t warm_count = 0;
             uint64_t order_id;
 
+            Portfolio portfolio;
+            
             std::vector<Report> history;
             std::unordered_map<uint64_t, Active_orders> active_orders;
     };

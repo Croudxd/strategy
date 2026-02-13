@@ -11,7 +11,6 @@ namespace backtester
         SELL,
     };
 
-
     struct Order 
     {
         uint64_t id;

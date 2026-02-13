@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include "Engine.hpp"
 #include "indicator.hpp"
+#include "order.hpp"
 #include "ring_buffer.hpp"
 #include "sma.hpp"
 
@@ -33,15 +34,18 @@ class Strategy
         void run(backtester::Ring_buffer ring_buffer, backtester::Engine<Strategy>& engine)
         {
             if (backtester::SMA(3) > backtester::SMA(12))
-                engine.order(100.0, 100.0, 1, 1);
+                engine.order(100.0, 100.0, backtester::Order_side::SELL, true);
+            if (backtester::SMA(12) > backtester::SMA(3))
+                engine.order(100.0, 100.0, backtester::Order_side::BUY, true);
         }
 };
 
 int main() 
 {
-    backtester::Engine<Strategy> engine;
+    backtester::Engine<Strategy> engine(10000.0, 0.000001);
     backtester::Indicator::set_ring_buffer(engine.get_ring_buffer());
     engine.connect();
+    engine.warmup(12);
     engine.run();
     return 0;
 }

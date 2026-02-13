@@ -30,7 +30,7 @@ namespace backtester
         uint64_t order_id;
         Status status;
         uint64_t last_quantity;
-        int64_t last_price;
+        uint64_t last_price;
         uint64_t leaves_quantity;
         Side side;
         Rejection_code reject_code;
