@@ -33,7 +33,7 @@ class Strategy
         void run(backtester::Ring_buffer ring_buffer, backtester::Engine<Strategy>& engine)
         {
             if (backtester::SMA(3) > backtester::SMA(12))
-                engine.buy(100.0, 100.0);
+                engine.order(100.0, 100.0, 1, 1);
         }
 };
 

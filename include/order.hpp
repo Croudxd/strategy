@@ -1,23 +1,26 @@
 #pragma once
 
 
+#include <cstdint>
+#include <sys/types.h>
 namespace backtester
 {
-    enum class FLAGS
+    enum class Order_side
     {
-        IOC,
-        NORMAL,
-        CANCEL,
-        //...
+        BUY,
+        SELL,
     };
+
 
     struct Order 
     {
-
-        long price;
-        long size;
-        FLAGS flag;
-
+        uint64_t id;
+        uint64_t size;
+        int32_t  price;
+        int8_t   side;   //sell / buy
+        int8_t   action; // cancel order 
+        int8_t   status; // trade/order
+        uint8_t  pad1[1];
     };
 }
 
