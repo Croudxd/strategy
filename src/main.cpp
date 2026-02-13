@@ -30,12 +30,12 @@
 
 class Strategy
 {
+    backtester::SMA short_ma{3};
+    backtester::SMA long_ma{12};
+
     public:
-        void run(backtester::Ring_buffer ring_buffer, backtester::Engine<Strategy>& engine)
+        void run(backtester::Ring_buffer& ring_buffer, backtester::Engine<Strategy>& engine)
         {
-            if (backtester::SMA(3) > backtester::SMA(12))
-                engine.order(100.0, 100.0, backtester::Order_side::SELL, true);
-            if (backtester::SMA(12) > backtester::SMA(3))
                 engine.order(100.0, 100.0, backtester::Order_side::BUY, true);
         }
 };

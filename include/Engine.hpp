@@ -1,4 +1,5 @@
 #pragma once
+#include <sys/stat.h>
 #include <cstdint>
 #include <iostream>
 #include <fcntl.h>
@@ -44,41 +45,64 @@ namespace backtester
                 ring_buffer = backtester::Ring_buffer();
                 history.reserve(1000);
             }
-
             template<typename T> 
-            T* map_mem(const char* path, MemoryFlags flag )
+            T* map_mem(const char* path, MemoryFlags flag)
             {
-
                 int fd = 0;
+                
                 if (flag == MemoryFlags::CONSUMER)
                 {
-                    fd = open(path, O_RDWR);
-                    while (fd == -1) 
+                    // Wait for the file to exist AND be the correct size
+                    while (true) 
                     {
-                        sleep(1);
                         fd = open(path, O_RDWR);
+                        if (fd != -1) 
+                        {
+                            struct stat st;
+                            if (fstat(fd, &st) == 0 && st.st_size >= static_cast<off_t>(sizeof(T))) 
+                            {
+                                break; // Ready to map
+                            }
+                            close(fd); // File exists but is size 0 or too small; wait.
+                        }
+                        std::cout << "Waiting for " << path << " to be initialized..." << std::endl;
+                        sleep(1);
                     }
                 }
-                if ( flag == MemoryFlags::PRODUCER)
+                else if (flag == MemoryFlags::PRODUCER)
                 {
-                        fd = open(path, O_RDWR | O_CREAT, 0666); 
-                        ftruncate(fd, sizeof(T)); 
+                    shm_unlink(path); 
+                    
+                    fd = open(path, O_RDWR | O_CREAT, 0666); 
+                    if (fd == -1) {
+                        std::cout << ("open failed"); 
+                        return nullptr;
+                    }
+                    if (ftruncate(fd, sizeof(T)) == -1) {
+                        std::cout << ("ftruncate failed");
+                        return nullptr;
+                    }
                 }
 
                 void* ptr = mmap(NULL, sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+                
+                // Always close the fd after mapping to avoid resource leaks
+                if (fd != -1) close(fd); 
+
                 if (ptr == MAP_FAILED) 
                 {
                     perror("mmap failed"); 
                     return nullptr;
                 }
-                std::cout << "Connected to memory" << std::endl;
+
+                std::cout << "Connected to: " << path << std::endl;
                 return static_cast<T*>(ptr);
             }
 
             void connect()
             {
-                candle_mem = map_mem<memory_struct<Candle>>("/dev/shm/hft_candle", MemoryFlags::CONSUMER);
                 order_mem = map_mem<memory_struct<Order>>("/dev/shm/hft_order", MemoryFlags::PRODUCER);
+                candle_mem = map_mem<memory_struct<Candle>>("/dev/shm/hft_candle", MemoryFlags::CONSUMER);
                 report_mem = map_mem<memory_struct<Report>>("/dev/shm/hft_report", MemoryFlags::CONSUMER);
             }
 
@@ -197,11 +221,17 @@ namespace backtester
                     std::cout << " [ No active orders ]\n";
                 } else {
                     std::cout << " ID    | SIDE | QTY      | PRICE    | TIMESTAMP\n";
-                    for (const auto& [id, ord] : active_orders) {
-                        printf(" %-5lu | %-4s | %-8lu | %-8u | %lu\n", 
-                               id, (ord.side == Side::BUY ? "BUY" : "SELL"),
-                               ord.leaves_quantity, ord.price, ord.timestamp);
-                    }
+
+                        size_t skip = active_orders.size() > 5 ? active_orders.size() - 5 : 0;
+                        auto it = active_orders.begin();
+                        std::advance(it, skip); // Fast-forward to the last 5
+
+                        for (; it != active_orders.end(); ++it) {
+                            const auto& [id, ord] = *it;
+                            printf(" %-5lu | %-4s | %-8lu | %-8u | %lu\n", 
+                                    id, (ord.side == Side::BUY ? "BUY" : "SELL"),
+                                    ord.leaves_quantity, ord.price, ord.timestamp);
+                        }
                 }
 
                 // Recent Activity Section
@@ -221,9 +251,10 @@ namespace backtester
         private:
 
             void on_report(const Report& raw) {
-                if (raw.status != Status::NEW) history.push_back(raw);
+                if (raw.status != Status::NEW && raw.last_quantity != 0 && raw.last_price != 0) history.push_back(raw);
+                if (raw.status == Status::CANCELED) return; 
 
-                if (raw.status == Status::NEW) 
+                if (raw.status == Status::NEW && raw.last_price != 0&& raw.last_price != 0) 
                 {
                     portfolio.update(raw, (double)raw.last_price);
                     
@@ -243,7 +274,7 @@ namespace backtester
                     if (it != active_orders.end()) 
                     {
                         double original_limit = (double)it->second.price;
-                        
+
                         portfolio.update(raw, original_limit);
 
                         if (raw.status == Status::FILLED || raw.status == Status::CANCELED) {

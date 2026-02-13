@@ -8,16 +8,6 @@ class Candle
         {
         }
 
-        void print()
-        {
-            std::cout << "[CANDLE]:" << std::endl
-                << "OPEN: " << open<< std::endl
-                << "HIGH: " << high<< std::endl
-                << "LOW: " << low << std::endl
-                << "CLOSE: " << close<< std::endl
-                << "VOLUME: " << volume << std::endl;
-        }
-
         long get_open() const
         {
             return open;
