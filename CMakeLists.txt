@@ -9,6 +9,7 @@ include_directories(include)
 # enable_testing()
 
 add_executable(strategy src/main.cpp)
+add_executable(viewer src/viewer.cpp)
 # add_executable(strategy-test test/test.cpp)
 
 #TEST:

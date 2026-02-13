@@ -1,34 +1,34 @@
 #pragma once
-#include <sys/stat.h>
-#include <cstdint>
-#include <iostream>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 #include "candle.hpp"
-#include "portfolio.hpp"
-#include "ring_buffer.hpp"
 #include "order.hpp"
+#include "portfolio.hpp"
 #include "report.hpp"
+#include "ring_buffer.hpp"
+#include "dashboard.hpp"
+#include <cstdint>
+#include <fcntl.h>
+#include <iostream>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <thread>
+#include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace backtester
 {
 
     static constexpr int BUFFER_CAPACITY = 16384;
 
-    template <typename T>
-    struct memory_struct 
+    template <typename T> struct memory_struct
     {
-        volatile uint64_t write_idx; 
+        volatile uint64_t write_idx;
         uint8_t           pad1[56];
-        volatile uint64_t read_idx; 
+        volatile uint64_t read_idx;
         uint8_t           pad2[56];
         T                 buffer[16384];
     };
-
 
     enum class MemoryFlags
     {
@@ -36,270 +36,262 @@ namespace backtester
         CONSUMER,
     };
 
-    template <typename Strategy>
-    class Engine
+    template <typename Strategy> class Engine
     {
-        public:
-            Engine(double starting_cash, double fees) : portfolio(starting_cash, fees)
+    public:
+        Engine(double starting_cash, double fees)
+            : portfolio(starting_cash, fees)
+        {
+            ring_buffer = backtester::Ring_buffer();
+            history.reserve(1000);
+        }
+        template <typename T> T* map_mem(const char* path, MemoryFlags flag)
+        {
+            int fd = 0;
+
+            if (flag == MemoryFlags::CONSUMER)
             {
-                ring_buffer = backtester::Ring_buffer();
-                history.reserve(1000);
-            }
-            template<typename T> 
-            T* map_mem(const char* path, MemoryFlags flag)
-            {
-                int fd = 0;
-                
-                if (flag == MemoryFlags::CONSUMER)
-                {
-                    // Wait for the file to exist AND be the correct size
-                    while (true) 
-                    {
-                        fd = open(path, O_RDWR);
-                        if (fd != -1) 
-                        {
-                            struct stat st;
-                            if (fstat(fd, &st) == 0 && st.st_size >= static_cast<off_t>(sizeof(T))) 
-                            {
-                                break; // Ready to map
-                            }
-                            close(fd); // File exists but is size 0 or too small; wait.
-                        }
-                        std::cout << "Waiting for " << path << " to be initialized..." << std::endl;
-                        sleep(1);
-                    }
-                }
-                else if (flag == MemoryFlags::PRODUCER)
-                {
-                    shm_unlink(path); 
-                    
-                    fd = open(path, O_RDWR | O_CREAT, 0666); 
-                    if (fd == -1) {
-                        std::cout << ("open failed"); 
-                        return nullptr;
-                    }
-                    if (ftruncate(fd, sizeof(T)) == -1) {
-                        std::cout << ("ftruncate failed");
-                        return nullptr;
-                    }
-                }
-
-                void* ptr = mmap(NULL, sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-                
-                // Always close the fd after mapping to avoid resource leaks
-                if (fd != -1) close(fd); 
-
-                if (ptr == MAP_FAILED) 
-                {
-                    perror("mmap failed"); 
-                    return nullptr;
-                }
-
-                std::cout << "Connected to: " << path << std::endl;
-                return static_cast<T*>(ptr);
-            }
-
-            void connect()
-            {
-                order_mem = map_mem<memory_struct<Order>>("/dev/shm/hft_order", MemoryFlags::PRODUCER);
-                candle_mem = map_mem<memory_struct<Candle>>("/dev/shm/hft_candle", MemoryFlags::CONSUMER);
-                report_mem = map_mem<memory_struct<Report>>("/dev/shm/hft_report", MemoryFlags::CONSUMER);
-            }
-
-            void run ()
-            {
-                uint64_t local_read_idx = candle_mem->write_idx;
-                candle_mem->read_idx = local_read_idx;
-
-                uint64_t local_report_read_idx = report_mem->write_idx;
-                report_mem->read_idx = local_report_read_idx;
-
                 while (true)
                 {
-                    uint64_t current_write_idx = candle_mem->write_idx;
-                    uint64_t current_report_write_idx = report_mem->write_idx;
-
-                    if (local_read_idx < current_write_idx) 
+                    fd = open(path, O_RDWR);
+                    if (fd != -1)
                     {
-                        int slot = local_read_idx % 16384;
-                        Candle raw = candle_mem->buffer[slot];
-
-                        ring_buffer.add(raw);
-                        local_read_idx++;
-                        candle_mem->read_idx = local_read_idx; 
-
-                        if (warm_count > 0)
+                        struct stat st;
+                        if (fstat(fd, &st) == 0 && st.st_size >= static_cast<off_t>(sizeof(T)))
                         {
-                            warm_count--;
-                            continue;
+                            break; 
                         }
-                        strategy.run(ring_buffer, *this);
+                        close(fd); 
                     }
-                    if (local_report_read_idx < current_report_write_idx)
+                    std::cout << "Waiting for " << path << " to be initialized..." << std::endl;
+                    sleep(1);
+                }
+            }
+            else if (flag == MemoryFlags::PRODUCER)
+            {
+                shm_unlink(path);
+
+                fd = open(path, O_RDWR | O_CREAT, 0666);
+                if (fd == -1)
+                {
+                    std::cout << ("open failed");
+                    return nullptr;
+                }
+                if (ftruncate(fd, sizeof(T)) == -1)
+                {
+                    std::cout << ("ftruncate failed");
+                    return nullptr;
+                }
+            }
+
+            void* ptr = mmap(NULL, sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+            if (fd != -1)
+                close(fd);
+
+            if (ptr == MAP_FAILED)
+            {
+                perror("mmap failed");
+                return nullptr;
+            }
+
+            std::cout << "Connected to: " << path << std::endl;
+            return static_cast<T*>(ptr);
+        }
+
+        void connect()
+        {
+            order_mem  = map_mem<memory_struct<Order>>("/dev/shm/hft_order", MemoryFlags::PRODUCER);
+            candle_mem = map_mem<memory_struct<Candle>>("/dev/shm/hft_candle", MemoryFlags::CONSUMER);
+            report_mem = map_mem<memory_struct<Report>>("/dev/shm/hft_report", MemoryFlags::CONSUMER);
+            dashboard_mem = map_mem<DashboardState>("/dev/shm/hft_dashboard", MemoryFlags::PRODUCER);
+
+            if (dashboard_mem) 
+            {
+                dashboard_mem->cash = portfolio.starting_cash;
+                dashboard_mem->active_order_count = 0;
+            }
+        }
+
+        void run()
+        {
+            uint64_t local_read_idx = candle_mem->write_idx;
+            candle_mem->read_idx    = local_read_idx;
+
+            uint64_t local_report_read_idx = report_mem->write_idx;
+            report_mem->read_idx           = local_report_read_idx;
+
+            while (true)
+            {
+                uint64_t current_write_idx        = candle_mem->write_idx;
+                uint64_t current_report_write_idx = report_mem->write_idx;
+
+                if (local_read_idx < current_write_idx)
+                {
+                    int    slot = local_read_idx % 16384;
+                    Candle raw  = candle_mem->buffer[slot];
+
+                    ring_buffer.add(raw);
+                    local_read_idx++;
+                    candle_mem->read_idx = local_read_idx;
+
+                    if (warm_count > 0)
                     {
-                        int slot = local_report_read_idx % 16384;
-                        Report raw = report_mem->buffer[slot];
-
-                        on_report(raw);
-
-                        local_report_read_idx++;
-                        report_mem->read_idx = local_report_read_idx; 
-                        display();
+                        warm_count--;
+                        continue;
                     }
-                    else 
+                    double price = ring_buffer.get(0).get_open();
+
+                    if (price < 0.0001)
+                    { 
+                        return; 
+                    }
+                    strategy.run(ring_buffer, *this);
+                }
+                if (local_report_read_idx < current_report_write_idx)
+                {
+                    int    slot = local_report_read_idx % 16384;
+                    Report raw  = report_mem->buffer[slot];
+
+                    on_report(raw);
+
+                    local_report_read_idx++;
+                    report_mem->read_idx = local_report_read_idx;
+                }
+                else
+                {
+                    std::this_thread::yield();
+                }
+            }
+        }
+
+        void order(float size, float price, Order_side side, bool cancel)
+        {
+            int8_t   int_side   = (side == Order_side::BUY) ? 0 : 1;
+            int8_t   int_action = (cancel == true) ? 1 : 0;
+            uint64_t p          = price * 100.0;
+            uint64_t s          = size * 1000000.0;
+            my_order_ids.insert(order_id);
+            Order    order           = Order(order_id++, p, s, int_side, int_action, 0 /** status*/);
+            uint64_t local_write_idx = order_mem->write_idx;
+            uint64_t cached_read_idx = order_mem->read_idx;
+            if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
+            {
+                cached_read_idx = order_mem->read_idx;
+            }
+            if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
+            {
+                return;
+            }
+            order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
+            std::atomic_thread_fence(std::memory_order_release);
+            order_mem->write_idx = local_write_idx + 1;
+        }
+
+        void cancel_order(uint64_t target_id)
+        {
+            Order    order = Order(target_id, 0 /**SIZE*/, 0 /**PRICE*/, 0 /**SIDE*/, 1 /**ACTION*/, 0 /**Status*/);
+            uint64_t local_write_idx = order_mem->write_idx;
+            uint64_t cached_read_idx = order_mem->read_idx;
+            if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
+            {
+                cached_read_idx = order_mem->read_idx;
+            }
+            if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
+            {
+                return;
+            }
+            order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
+            std::atomic_thread_fence(std::memory_order_release);
+            order_mem->write_idx = local_write_idx + 1;
+        }
+
+        void warmup(size_t size)
+        {
+            warm_count = size;
+        }
+
+        backtester::Ring_buffer* get_ring_buffer()
+        {
+            return &ring_buffer;
+        }
+
+    private:
+        void on_report(const Report& raw)
+        {
+            if (my_order_ids.find(raw.order_id) == my_order_ids.end())
+            {
+                return;
+            }
+
+            if (raw.order_id == 0 && raw.last_price == 0 && raw.leaves_quantity == 0)
+            {
+                return;
+            }
+
+            if (raw.status != Status::NEW)
+                history.push_back(raw);
+
+            if (raw.status == Status::NEW)
+            {
+                portfolio.update(raw, (double)raw.last_price);
+                active_orders[raw.order_id]
+                    = Active_orders { raw.order_id, raw.leaves_quantity, raw.last_price, raw.side, raw.timestamp };
+            }
+            else
+            {
+                auto it = active_orders.find(raw.order_id);
+                if (it != active_orders.end())
+                {
+                    // Use the ORIGINAL price from our map, not the report's last_price
+                    double original_limit = (double)it->second.price;
+                    portfolio.update(raw, original_limit);
+
+                    if (raw.status == Status::FILLED || raw.status == Status::CANCELED)
                     {
-                        std::this_thread::yield();
+                        active_orders.erase(it);
+
+                        // Optional: Clean up the ID set to save memory,
+                        // but keeping it prevents ID reuse issues.
+                        my_order_ids.erase(raw.order_id);
+                    }
+                    else if (raw.status == Status::PARTIALLY_FILLED)
+                    {
+                        it->second.leaves_quantity = raw.leaves_quantity;
                     }
                 }
             }
+        if (dashboard_mem) 
+        {
+                dashboard_mem->cash = portfolio.cash;
+                dashboard_mem->locked_cash = portfolio.locked_cash;
+                dashboard_mem->position = portfolio.position;
+                dashboard_mem->total_fees = portfolio.total_fees;
+                dashboard_mem->active_order_count = active_orders.size();
+                dashboard_mem->last_update_ts = raw.timestamp;
 
-            void order(float size, float price, Order_side side, bool cancel)
-            {
-                int8_t int_side = (side == Order_side::BUY) ? 0 : 1; 
-                int8_t int_action = (cancel == true) ? 1 : 0; 
-                uint64_t p = price * 100.0;
-                uint64_t s = size * 1000000.0;
-                Order order = Order(order_id++, p, s, int_side, int_action, 0 /** status*/);
-                uint64_t local_write_idx = order_mem->write_idx;
-                uint64_t cached_read_idx = order_mem->read_idx; 
-                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
-                {
-                    cached_read_idx = order_mem->read_idx;
-                    
+                if (raw.status == Status::FILLED) {
+                    dashboard_mem->total_trades++;
+                    dashboard_mem->last_trade_price = (double)raw.last_price / 100.0;
+                    dashboard_mem->last_trade_id = raw.order_id;
                 }
-                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
-                {
-                    return;
-                }
-
-                order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
-                std::atomic_thread_fence(std::memory_order_release);
-                order_mem->write_idx = local_write_idx + 1;
             }
+        }
 
-            void cancel_order(uint64_t target_id)
-            {
-                Order order = Order(target_id, 0/**SIZE*/, 0/**PRICE*/, 0/**SIDE*/, 1/**ACTION*/, 0/**Status*/);
-                uint64_t local_write_idx = order_mem->write_idx;
-                uint64_t cached_read_idx = order_mem->read_idx; 
-                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
-                {
-                    cached_read_idx = order_mem->read_idx;
-                }
-                if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY) 
-                {
-                    return;
-                }
-                order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
-                std::atomic_thread_fence(std::memory_order_release);
-                order_mem->write_idx = local_write_idx + 1;
-            }
+        Strategy               strategy;
+        memory_struct<Candle>* candle_mem;
+        memory_struct<Order>*  order_mem;
+        memory_struct<Report>* report_mem;
+        Ring_buffer            ring_buffer;
+        size_t                 warm_count = 0;
+        uint64_t               order_id   = 0;
 
-            void warmup(size_t size)
-            {
-                warm_count = size;
-            }
+        Portfolio portfolio;
 
-            backtester::Ring_buffer* get_ring_buffer()
-            {
-                return &ring_buffer;
-            }
-            void display() 
-            {
-                // Reset cursor to top-left and clear the screen
-                std::cout << "\033[H\033[J"; 
+        DashboardState* dashboard_mem;
 
-                std::cout << "--- ACCOUNT BALANCE ------------------------------------\n";
-                printf(" CASH AVAILABLE: $%12.2f\n", portfolio.get_cash());
-                printf(" CASH LOCKED:    $%12.2f\n", portfolio.locked_cash);
-                printf(" POSITION:       %14.2f units\n", portfolio.position);
-                printf(" ACCUM. FEES:    $%12.2f\n", portfolio.total_fees);
-
-                // Active Orders Section
-                std::cout << "\n--- OPEN ORDERS (" << active_orders.size() << ") -------------------------------\n";
-                if (active_orders.empty()) {
-                    std::cout << " [ No active orders ]\n";
-                } else {
-                    std::cout << " ID    | SIDE | QTY      | PRICE    | TIMESTAMP\n";
-
-                        size_t skip = active_orders.size() > 5 ? active_orders.size() - 5 : 0;
-                        auto it = active_orders.begin();
-                        std::advance(it, skip); // Fast-forward to the last 5
-
-                        for (; it != active_orders.end(); ++it) {
-                            const auto& [id, ord] = *it;
-                            printf(" %-5lu | %-4s | %-8lu | %-8u | %lu\n", 
-                                    id, (ord.side == Side::BUY ? "BUY" : "SELL"),
-                                    ord.leaves_quantity, ord.price, ord.timestamp);
-                        }
-                }
-
-                // Recent Activity Section
-                std::cout << "\n--- RECENT ACTIVITY ------------------------------------\n";
-                size_t start = history.size() > 5 ? history.size() - 5 : 0;
-                for (size_t i = start; i < history.size(); ++i) {
-                    auto& r = history[i];
-                    const char* s = (r.status == Status::FILLED) ? "FILL" : 
-                                    (r.status == Status::PARTIALLY_FILLED) ? "PART" : 
-                                    (r.status == Status::NEW) ? "NEW " : "CNCL";
-                    
-                    printf(" [%-4s] Order #%-4lu | Qty: %-6lu | Px: %-8ld\n", 
-                           s, r.order_id, r.last_quantity, r.last_price);
-                }
-                std::cout << "--------------------------------------------------------" << std::endl;
-            }
-        private:
-
-            void on_report(const Report& raw) {
-                if (raw.status != Status::NEW && raw.last_quantity != 0 && raw.last_price != 0) history.push_back(raw);
-                if (raw.status == Status::CANCELED) return; 
-
-                if (raw.status == Status::NEW && raw.last_price != 0&& raw.last_price != 0) 
-                {
-                    portfolio.update(raw, (double)raw.last_price);
-                    
-                    active_orders[raw.order_id] = Active_orders
-                    {
-                        raw.order_id,
-                        raw.leaves_quantity,
-                        raw.last_price,
-                        raw.side,
-                        raw.timestamp
-
-                    };
-                }
-                else 
-                {
-                    auto it = active_orders.find(raw.order_id);
-                    if (it != active_orders.end()) 
-                    {
-                        double original_limit = (double)it->second.price;
-
-                        portfolio.update(raw, original_limit);
-
-                        if (raw.status == Status::FILLED || raw.status == Status::CANCELED) {
-                            active_orders.erase(it);
-                        }
-                        else if (raw.status == Status::PARTIALLY_FILLED) {
-                            it->second.leaves_quantity = raw.leaves_quantity;
-                        }
-                    }
-                }
-                display();
-            }
-
-
-            Strategy strategy;
-            memory_struct<Candle>* candle_mem;
-            memory_struct<Order>* order_mem;
-            memory_struct<Report>* report_mem;
-            Ring_buffer ring_buffer;
-            size_t warm_count = 0;
-            uint64_t order_id;
-
-            Portfolio portfolio;
-            
-            std::vector<Report> history;
-            std::unordered_map<uint64_t, Active_orders> active_orders;
+        std::vector<Report>                         history;
+        std::unordered_map<uint64_t, Active_orders> active_orders;
+        std::unordered_set<uint64_t>                my_order_ids;
     };
-};
+}; // namespace backtester
