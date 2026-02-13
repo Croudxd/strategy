@@ -66,15 +66,20 @@ namespace backtester
                 
                 if (rep.side == Side::BUY) 
                 {
-                    double lock_portion = real_limit_price * real_last_qty;
-                    
-                    position    += real_last_qty;
-                    locked_cash -= lock_portion;
-                    
-                    cash += (lock_portion - trade_value);
-                    
-                    if (order_locks.count(rep.order_id)) {
+                    position += real_last_qty;
+
+                    if (order_locks.count(rep.order_id)) 
+                    {
+                        double lock_portion = real_limit_price * real_last_qty;
+                        
+                        locked_cash -= lock_portion;
+                        cash += (lock_portion - trade_value); // Refund the difference
+                        
                         order_locks[rep.order_id] -= lock_portion;
+                    }
+                    else 
+                    {
+                        cash -= trade_value;
                     }
                 }
                 else 
@@ -82,27 +87,11 @@ namespace backtester
                     position -= real_last_qty;
                     cash     += trade_value;
                 }
+                
                 double local_fee = trade_value * fee_rate;
                 total_fees += local_fee;
                 cash -= local_fee;
-            }
-            else if (rep.status == Status::CANCELED || rep.status == Status::REJECTED)
-            {
-                if (rep.side == Side::BUY) 
-                {
-                    if (order_locks.count(rep.order_id)) {
-                        double refund = order_locks[rep.order_id];
-                        locked_cash -= refund;
-                        cash += refund;
-                        order_locks.erase(rep.order_id); } }
-            }
-
-            if (rep.status == Status::FILLED)
-            {
-                order_locks.erase(rep.order_id);
-            }
-
-            if (locked_cash < 1e-8) locked_cash = 0.0;
+                }
         }
     };
 }

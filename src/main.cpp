@@ -33,16 +33,24 @@ class Strategy
     backtester::SMA short_ma { 3 };
     backtester::SMA long_ma { 12 };
 
-public:
-    void run(backtester::Ring_buffer& ring_buffer, backtester::Engine<Strategy>& engine)
-    {
-        engine.order(100.0, 100.0, backtester::Order_side::BUY, false);
-    }
+    public:
+        void run(backtester::Ring_buffer& ring_buffer, backtester::Engine<Strategy>& engine)
+        {
+            double current_price = (double)ring_buffer.get(0).get_open();
+
+            long sma_s = short_ma.calculate(); 
+            long sma_l = long_ma.calculate();
+
+            // if (sma_s > sma_l) 
+            // {
+                engine.order(1.0, current_price, backtester::Order_side::BUY, false);
+            // }
+        }
 };
 
 int main()
 {
-    backtester::Engine<Strategy> engine(10000.0, 0.000001);
+    backtester::Engine<Strategy> engine(100000000.0, 0.000001);
     backtester::Indicator::set_ring_buffer(engine.get_ring_buffer());
     engine.connect();
     engine.run();

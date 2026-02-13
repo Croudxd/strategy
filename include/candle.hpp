@@ -12,6 +12,15 @@ class Candle
         {
             return open;
         }
+
+        void print()
+        {
+            std::cout << "OPEN: " << open << std::endl;
+            std::cout << "high: " << high << std::endl;
+            std::cout << "low: " << low << std::endl;
+            std::cout << "close: " << close << std::endl;
+            std::cout << "volume: " << volume << std::endl;
+        }
     private:
         long open;
         long high;

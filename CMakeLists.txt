@@ -10,6 +10,8 @@ include_directories(include)
 
 add_executable(strategy src/main.cpp)
 add_executable(viewer src/viewer.cpp)
+add_executable(test src/test.cpp)
+add_executable(benchmark src/benchmark.cpp)
 # add_executable(strategy-test test/test.cpp)
 
 #TEST:

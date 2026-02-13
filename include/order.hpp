@@ -1,4 +1,5 @@
 #pragma once
+#include <iostream>
 
 
 #include <cstdint>
@@ -15,11 +16,19 @@ namespace backtester
     {
         uint64_t id;
         uint64_t size;
-        int32_t  price;
+        int64_t  price;
         int8_t   side;   //sell / buy
         int8_t   action; // cancel order 
         int8_t   status; // trade/order
         uint8_t  pad1[1];
+
+        void print()
+        {
+
+            std::cout << "id: " << id << std::endl;
+            std::cout << "size: " << size << std::endl;
+            std::cout << "price: " << price << std::endl;
+        }
     };
 }
 

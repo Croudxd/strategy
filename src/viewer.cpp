@@ -21,7 +21,7 @@ int main() {
         }
     }
 
-    DashboardState* state = (DashboardState*)mmap(NULL, sizeof(DashboardState), 
+    Dashboard_state* state = (Dashboard_state*)mmap(NULL, sizeof(Dashboard_state), 
                                                 PROT_READ, MAP_SHARED, fd, 0);
 
     std::cout << "\033[2J"; 

@@ -104,7 +104,7 @@ namespace backtester
             order_mem  = map_mem<memory_struct<Order>>("/dev/shm/hft_order", MemoryFlags::PRODUCER);
             candle_mem = map_mem<memory_struct<Candle>>("/dev/shm/hft_candle", MemoryFlags::CONSUMER);
             report_mem = map_mem<memory_struct<Report>>("/dev/shm/hft_report", MemoryFlags::CONSUMER);
-            dashboard_mem = map_mem<DashboardState>("/dev/shm/hft_dashboard", MemoryFlags::PRODUCER);
+            dashboard_mem = map_mem<Dashboard_state>("/dev/shm/hft_dashboard", MemoryFlags::PRODUCER);
 
             if (dashboard_mem) 
             {
@@ -115,6 +115,7 @@ namespace backtester
 
         void run()
         {
+            order(123,12345678, Order_side::BUY, false );
             uint64_t local_read_idx = candle_mem->write_idx;
             candle_mem->read_idx    = local_read_idx;
 
@@ -144,7 +145,9 @@ namespace backtester
 
                     if (price < 0.0001)
                     { 
-                        return; 
+                        local_read_idx++;
+                        candle_mem->read_idx = local_read_idx;
+                        continue;
                     }
                     strategy.run(ring_buffer, *this);
                 }
@@ -153,6 +156,7 @@ namespace backtester
                     int    slot = local_report_read_idx % 16384;
                     Report raw  = report_mem->buffer[slot];
 
+                    raw.print();
                     on_report(raw);
 
                     local_report_read_idx++;
@@ -167,22 +171,26 @@ namespace backtester
 
         void order(float size, float price, Order_side side, bool cancel)
         {
-            int8_t   int_side   = (side == Order_side::BUY) ? 0 : 1;
-            int8_t   int_action = (cancel == true) ? 1 : 0;
-            uint64_t p          = price * 100.0;
-            uint64_t s          = size * 1000000.0;
-            my_order_ids.insert(order_id);
-            Order    order           = Order(order_id++, p, s, int_side, int_action, 0 /** status*/);
-            uint64_t local_write_idx = order_mem->write_idx;
-            uint64_t cached_read_idx = order_mem->read_idx;
-            if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
-            {
-                cached_read_idx = order_mem->read_idx;
-            }
-            if (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
+            if (price > portfolio.get_cash())
             {
                 return;
             }
+            int8_t   int_side   = (side == Order_side::BUY) ? 0 : 1;
+            int8_t   int_action = (cancel == true) ? 1 : 0;
+            uint64_t p          = price * 100;
+            uint64_t s          = size * 1000000;
+            my_order_ids.insert(order_id);
+            Order    order           = Order(order_id++, s, p, int_side, int_action, 0 /** status*/);
+            uint64_t local_write_idx = order_mem->write_idx;
+            uint64_t cached_read_idx = order_mem->read_idx;
+            order.print();
+            while (local_write_idx - cached_read_idx >= BUFFER_CAPACITY)
+            {
+
+                std::atomic_thread_fence(std::memory_order_acquire);
+                cached_read_idx = order_mem->read_idx;
+            }
+            order.print();
             order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = order;
             std::atomic_thread_fence(std::memory_order_release);
             order_mem->write_idx = local_write_idx + 1;
@@ -243,16 +251,12 @@ namespace backtester
                 auto it = active_orders.find(raw.order_id);
                 if (it != active_orders.end())
                 {
-                    // Use the ORIGINAL price from our map, not the report's last_price
                     double original_limit = (double)it->second.price;
                     portfolio.update(raw, original_limit);
 
                     if (raw.status == Status::FILLED || raw.status == Status::CANCELED)
                     {
                         active_orders.erase(it);
-
-                        // Optional: Clean up the ID set to save memory,
-                        // but keeping it prevents ID reuse issues.
                         my_order_ids.erase(raw.order_id);
                     }
                     else if (raw.status == Status::PARTIALLY_FILLED)
@@ -260,9 +264,22 @@ namespace backtester
                         it->second.leaves_quantity = raw.leaves_quantity;
                     }
                 }
+                else
+                {
+                    if (raw.status == Status::FILLED || raw.status == Status::PARTIALLY_FILLED)
+                    {
+                        portfolio.update(raw, (double)raw.last_price);
+
+                        if (raw.status == Status::FILLED)
+                        {
+                            my_order_ids.erase(raw.order_id);
+                        }
+                    }
+                }
             }
-        if (dashboard_mem) 
-        {
+
+            if (dashboard_mem)
+            {
                 dashboard_mem->cash = portfolio.cash;
                 dashboard_mem->locked_cash = portfolio.locked_cash;
                 dashboard_mem->position = portfolio.position;
@@ -270,7 +287,8 @@ namespace backtester
                 dashboard_mem->active_order_count = active_orders.size();
                 dashboard_mem->last_update_ts = raw.timestamp;
 
-                if (raw.status == Status::FILLED) {
+                if (raw.status == Status::FILLED)
+                {
                     dashboard_mem->total_trades++;
                     dashboard_mem->last_trade_price = (double)raw.last_price / 100.0;
                     dashboard_mem->last_trade_id = raw.order_id;
@@ -288,7 +306,7 @@ namespace backtester
 
         Portfolio portfolio;
 
-        DashboardState* dashboard_mem;
+        Dashboard_state* dashboard_mem;
 
         std::vector<Report>                         history;
         std::unordered_map<uint64_t, Active_orders> active_orders;
