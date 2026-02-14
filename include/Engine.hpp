@@ -294,7 +294,7 @@ namespace backtester
 
                 if (raw.status == Status::FILLED)
                 {
-                    dashboard_mem->total_trades++;
+                    dashboard_mem->total_trades+1;
                     dashboard_mem->last_trade_price = (double)raw.last_price / 100.0;
                     dashboard_mem->last_trade_id = raw.order_id;
                 }
