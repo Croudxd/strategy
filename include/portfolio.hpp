@@ -41,13 +41,14 @@ namespace backtester
             return position;
         }
 
-       void update(const Report& rep, double limit_price)
+        void update(const Report& rep, double limit_price)
         {
             double real_limit_price = limit_price / 100.0;
             double real_last_price  = (double)rep.last_price / 100.0;
             
-            double real_last_qty    = (double)rep.last_quantity   / 1000000.0;
+            double real_last_qty    = (double)rep.last_quantity    / 1000000.0;
             double real_leaves_qty  = (double)rep.leaves_quantity / 1000000.0;
+
 
             if (rep.status == Status::NEW)
             {
@@ -56,7 +57,6 @@ namespace backtester
                     double amount_to_lock = real_limit_price * real_leaves_qty;
                     cash -= amount_to_lock;
                     locked_cash += amount_to_lock;
-                    
                     order_locks[rep.order_id] = amount_to_lock;
                 }
             }
@@ -73,8 +73,7 @@ namespace backtester
                         double lock_portion = real_limit_price * real_last_qty;
                         
                         locked_cash -= lock_portion;
-                        cash += (lock_portion - trade_value); // Refund the difference
-                        
+                        cash += (lock_portion - trade_value); 
                         order_locks[rep.order_id] -= lock_portion;
                     }
                     else 
@@ -91,7 +90,7 @@ namespace backtester
                 double local_fee = trade_value * fee_rate;
                 total_fees += local_fee;
                 cash -= local_fee;
-                }
+            }
         }
     };
 }

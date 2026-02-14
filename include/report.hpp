@@ -21,6 +21,7 @@ namespace backtester
 
     enum class Rejection_code
     {
+        NOERROR,
         NO_FUNDS,
         PRICE_OUT_OF_BOUNDS,
         SYSTEM_ERROR,

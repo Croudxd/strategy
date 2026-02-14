@@ -16,8 +16,13 @@
 #include <unordered_set>
 #include <vector>
 
+#ifdef UNIT_TEST
+class report_function_repo_Test;
+#endif
+
 namespace backtester
 {
+
 
     static constexpr int BUFFER_CAPACITY = 16384;
 
@@ -36,8 +41,14 @@ namespace backtester
         CONSUMER,
     };
 
-    template <typename Strategy> class Engine
+    template <typename Strategy> 
+    class Engine
     {
+
+#ifdef UNIT_TEST
+    friend class ::report_function_repo_Test;
+#endif 
+
     public:
         Engine(double starting_cash, double fees)
             : portfolio(starting_cash, fees)
@@ -45,7 +56,8 @@ namespace backtester
             ring_buffer = backtester::Ring_buffer();
             history.reserve(1000);
         }
-        template <typename T> T* map_mem(const char* path, MemoryFlags flag)
+        template <typename T> 
+        T* map_mem(const char* path, MemoryFlags flag)
         {
             int fd = 0;
 
@@ -113,7 +125,6 @@ namespace backtester
 
         void run()
         {
-            order(123,12345678, Order_side::BUY, false );
             uint64_t local_read_idx = candle_mem->write_idx;
             candle_mem->read_idx    = local_read_idx;
 
@@ -219,7 +230,6 @@ namespace backtester
             return &ring_buffer;
         }
 
-    private:
         void on_report(const Report& raw)
         {
             if (my_order_ids.find(raw.order_id) == my_order_ids.end())
@@ -291,6 +301,7 @@ namespace backtester
             }
         }
 
+    private:
         Strategy               strategy;
         memory_struct<Candle>* candle_mem;
         memory_struct<Order>*  order_mem;
