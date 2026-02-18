@@ -22,8 +22,6 @@ class report_function_repo_Test;
 
 namespace backtester
 {
-
-
     static constexpr int BUFFER_CAPACITY = 16384;
 
     template <typename T> struct memory_struct
@@ -177,7 +175,7 @@ namespace backtester
             }
         }
 
-        void order(float size, float price, Order_side side, bool cancel)
+        void order(float size, float price, Order_side side)
         {
             if (price > portfolio.get_cash())
             {
@@ -317,5 +315,6 @@ namespace backtester
         std::vector<Report>                         history;
         std::unordered_map<uint64_t, Active_orders> active_orders;
         std::unordered_set<uint64_t>                my_order_ids;
+
     };
 }; // namespace backtester
