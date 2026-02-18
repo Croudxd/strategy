@@ -11,6 +11,7 @@
 #include <deque>
 #include <fcntl.h>
 #include <iostream>
+#include <stdatomic.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <thread>
@@ -186,9 +187,19 @@ namespace backtester
 
         void order(float size, float price, Order_side side)
         {
-            if (price * size > portfolio.get_cash())
+            if (side == Order_side::BUY)
             {
-                return;
+                if ((price * size) > portfolio.get_cash())
+                {
+                    return; 
+                }
+
+            else if (side == Order_side::SELL)
+            {
+                if (size > portfolio.get_position())
+                {
+                    return;
+                }
             }
             int8_t   int_side   = (side == Order_side::BUY) ? 0 : 1;
             uint64_t p          = price * 100;
