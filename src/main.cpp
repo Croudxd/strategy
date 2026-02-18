@@ -43,7 +43,7 @@ class Strategy
 
             // if (sma_s > sma_l) 
             // {
-                engine.order(1.0, current_price, backtester::Order_side::BUY, false);
+                engine.order(1.0, current_price, backtester::Order_side::BUY);
             // }
         }
 };
