@@ -30,5 +30,11 @@ namespace backtester
         }
 
      };
+
+    struct Delayed_order
+    {
+        Order order;
+        uint64_t time;
+    };
 }
 

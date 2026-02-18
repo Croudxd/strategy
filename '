@@ -7,8 +7,7 @@
 #include "dashboard.hpp"
 #include <chrono>
 #include <cstdint>
-#include "time.hpp"
-#include <deque>
+#include "time.h"
 #include <fcntl.h>
 #include <iostream>
 #include <sys/mman.h>
@@ -132,7 +131,6 @@ namespace backtester
             uint64_t local_report_read_idx = report_mem->write_idx;
             report_mem->read_idx           = local_report_read_idx;
 
-            write_order();
             while (true)
             {
                 uint64_t current_write_idx        = candle_mem->write_idx;
@@ -183,7 +181,6 @@ namespace backtester
         {
             this->delay = time;
         }
-
         void order(float size, float price, Order_side side)
         {
             if (price * size > portfolio.get_cash())
@@ -195,7 +192,7 @@ namespace backtester
             uint64_t s          = size * 1000000;
             my_order_ids.insert(order_id);
             Order    order           = Order(order_id++, s, p, int_side, 0, 0 /** status*/);
-            delayed_orders.emplace_back(order, get_real_time_ms() + delay);
+            delayed_orders.emplace_back(order, 101);
         }
 
         void cancel_order(uint64_t target_id)
@@ -305,7 +302,7 @@ namespace backtester
             {
                 return;
             }
-            if (get_real_time_ms() >= delayed_orders[0].time)
+            if (get_real_time_ms() - delayed_orders[0].time > 0)
             {
                 uint64_t local_write_idx = order_mem->write_idx;
                 uint64_t cached_read_idx = order_mem->read_idx;
@@ -317,7 +314,6 @@ namespace backtester
                 order_mem->buffer[local_write_idx % BUFFER_CAPACITY] = delayed_orders[0].order;
                 std::atomic_thread_fence(std::memory_order_release);
                 order_mem->write_idx = local_write_idx + 1;
-                delayed_orders.pop_front();
             }
         }
 
@@ -337,7 +333,7 @@ namespace backtester
         std::unordered_map<uint64_t, Active_orders> active_orders;
         std::unordered_set<uint64_t>                my_order_ids;
 
-        std::deque<Delayed_order> delayed_orders;
+        std::vector<Delayed_order> delayed_orders;
         uint64_t delay;
 
     };
