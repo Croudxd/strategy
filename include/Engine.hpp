@@ -133,9 +133,9 @@ namespace backtester
             uint64_t local_report_read_idx = report_mem->write_idx;
             report_mem->read_idx           = local_report_read_idx;
 
-            write_order();
             while (true)
             {
+                write_order();
                 uint64_t current_write_idx        = candle_mem->write_idx;
                 uint64_t current_report_write_idx = report_mem->write_idx;
 
@@ -193,7 +193,7 @@ namespace backtester
                 {
                     return; 
                 }
-
+            }
             else if (side == Order_side::SELL)
             {
                 if (size > portfolio.get_position())
