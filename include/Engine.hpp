@@ -11,7 +11,6 @@
 #include <deque>
 #include <fcntl.h>
 #include <iostream>
-#include <stdatomic.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <thread>

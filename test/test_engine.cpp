@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <atomic>
 #include "Engine.hpp"
 #include "candle.hpp"
 #include "indicator.hpp"
